@@ -1,431 +1,329 @@
 package com.example.ingles
 
-import EnglishModel
-import android.app.Activity.RESULT_OK
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.util.Log
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.dp
-import com.example.ingles.pages.addNewItem.AddNewItemScreen
-import com.example.ingles.pages.manageTypes.ManageTypesScreen
-import com.example.ingles.ui.theme.INGLESTheme
-import com.example.ingles.util.Constants
-import com.example.tool.common.MainViewModel
-import com.google.gson.Gson
-import saveJsonToFile
-import java.util.*
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import java.util.Locale
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+
     private lateinit var tts: TextToSpeech
-    private var speechRate by mutableStateOf(0.1f)
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private var webView: WebView? = null
+    private var isListening = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        tts = TextToSpeech(this, this)
-        val context: Context = this
-        val viewModel: MainViewModel by viewModels()
-        viewModel.LoadData(context, viewModel)
         
+        tts = TextToSpeech(this, this)
+        
+        // Initialize SpeechRecognizer
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer.setRecognitionListener(recognitionListener)
+        } else {
+            Toast.makeText(this, "Speech Recognition not available", Toast.LENGTH_SHORT).show()
+        }
+
+        val permissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted: Boolean ->
+            if (!isGranted) {
+                Toast.makeText(this, "Permission Denied: Audio recording needed for voice chat", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
         setContent {
-            INGLESTheme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    bottomBar = { BottomNavigationBar(viewModel) { viewModel.selectedScreen = it } }
-                ) { innerPadding ->
-                    Box(modifier = Modifier.padding(10.dp)) {
-                        when (viewModel.selectedScreen) {
-                            "Add" -> AddNewItemScreen(context, viewModel)
-                            "Types" -> ManageTypesScreen(viewModel)
-                            "Home" -> PhraseListApp(
-                                tts = tts,
-                                speechRate = speechRate,
-                                onSpeechRateChange = { newRate -> speechRate = newRate },
-                                onSpeak = { text -> tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null) },
-                                modifier = Modifier.padding(innerPadding),
-                                context = context,
-                                viewModel = viewModel
-                            )
+            WebViewScreen()
+        }
+    }
+
+    @Composable
+    fun WebViewScreen() {
+        AndroidView(
+            factory = { context ->
+                WebView(context).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mediaPlaybackRequiresUserGesture = false
+                    settings.allowFileAccess = true
+                    
+                    addJavascriptInterface(WebAppInterface(this@MainActivity), "Android")
+                    
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            Log.d("WebView", "Page finished loading: $url")
+                            super.onPageFinished(view, url)
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?, 
+                            errorCode: Int, 
+                            description: String?, 
+                            failingUrl: String?
+                        ) {
+                            Log.e("WebView", "Error: $description, code: $errorCode, url: $failingUrl")
+                            super.onReceivedError(view, errorCode, description, failingUrl)
                         }
                     }
+                    
+                    loadUrl("file:///android_asset/chat.html")
+                    
+                    WebView.setWebContentsDebuggingEnabled(true)
+                    webView = this
                 }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    // --- Speech Recognition Logic ---
+
+    fun startRecognition(lang: String) {
+        if (!::speechRecognizer.isInitialized) return
+        
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (lang == "es") "es-ES" else "en-US")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        
+        runOnUiThread {
+            try {
+                speechRecognizer.startListening(intent)
+                callJs("onAndroidSpeechStarted()")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error starting speech: ${e.message}")
+                callJs("onAndroidSpeechError('${e.message}')")
             }
         }
     }
+
+    fun stopRecognition() {
+        if (!::speechRecognizer.isInitialized) return
+        runOnUiThread {
+            speechRecognizer.stopListening()
+        }
+    }
+
+    private val recognitionListener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) { Log.d("SR", "Ready") }
+        override fun onBeginningOfSpeech() { Log.d("SR", "Beginning") }
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() { 
+            Log.d("SR", "End of speech") 
+            // Don't change UI state yet, wait for results or error
+        }
+        
+        override fun onError(error: Int) {
+            val errorMessage = getErrorText(error)
+            Log.e("SR", "Error: $errorMessage")
+            runOnUiThread {
+                callJs("onAndroidSpeechError('$errorMessage')")
+            }
+        }
+
+        override fun onResults(results: Bundle?) {
+            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val text = matches?.get(0) ?: ""
+            Log.d("SR", "Results: $text")
+            runOnUiThread {
+                callJs("onAndroidSpeechResult('${escapeJs(text)}')")
+            }
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) {
+             // Optional: Update UI live?
+        }
+
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
+    private fun getErrorText(errorCode: Int): String {
+        return when (errorCode) {
+            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+            SpeechRecognizer.ERROR_CLIENT -> "Client side error"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
+            SpeechRecognizer.ERROR_NETWORK -> "Network error"
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+            SpeechRecognizer.ERROR_NO_MATCH -> "No match"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
+            SpeechRecognizer.ERROR_SERVER -> "Server error"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
+            else -> "Unknown error"
+        }
+    }
+
+    // --- TTS Logic ---
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val result = tts.setLanguage(Locale.US)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Toast.makeText(this, "Language not supported", Toast.LENGTH_SHORT).show()
-            } else {
-                tts.setSpeechRate(speechRate)
-            }
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    runOnUiThread { callJs("onAndroidTtsStart()") }
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    runOnUiThread { callJs("onAndroidTtsEnd()") }
+                }
+
+                override fun onError(utteranceId: String?) {
+                    runOnUiThread { callJs("onAndroidTtsEnd()") }
+                }
+            })
         } else {
-            Toast.makeText(this, "TTS initialization failed", Toast.LENGTH_SHORT).show()
+             Log.e("TTS", "Initialization failed")
         }
     }
 
+    fun speak(text: String, lang: String, rate: Float = 1.0f, pitch: Float = 1.0f) {
+        val locale = if (lang == "es") Locale("es", "ES") else Locale.US
+        val result = tts.setLanguage(locale)
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            Log.e("TTS", "Language $lang not supported")
+            Toast.makeText(this, "Language $lang not supported by system TTS", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        if (::tts.isInitialized) {
+            tts.setSpeechRate(rate)
+            tts.setPitch(pitch)
+        }
+        
+        val params = Bundle()
+        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "TTS_ID")
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "TTS_ID")
+    }
+
+    fun setSpeechRate(rate: Float) {
+        if (::tts.isInitialized) {
+            tts.setSpeechRate(rate)
+        }
+    }
+
+    // --- Helper ---
+
+    fun callJs(script: String) {
+        webView?.evaluateJavascript(script, null)
+    }
+
+    private fun escapeJs(text: String): String {
+        return text.replace("'", "\\'").replace("\n", " ")
+    }
+    
     override fun onDestroy() {
         if (::tts.isInitialized) {
             tts.stop()
             tts.shutdown()
         }
+        if (::speechRecognizer.isInitialized) {
+            speechRecognizer.destroy()
+        }
         super.onDestroy()
     }
-}
+    
+    // --- Interface Class ---
 
-@Composable
-fun PhraseListApp(
-    tts: TextToSpeech,
-    speechRate: Float,
-    onSpeechRateChange: (Float) -> Unit,
-    onSpeak: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    context: Context,
-    viewModel: MainViewModel
-) {
-    var showSpeechRecognition by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    var selectedTabIndex by remember { mutableStateOf(0) }
-
-    // Lanzador para el reconocimiento de voz
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.get(0)
-            Toast.makeText(context, "You said: $spokenText", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    Column(modifier = modifier) {
-        // TabRow con scroll horizontal
-        ScrollableTabRow(
-            selectedTabIndex = selectedTabIndex,
-            edgePadding = 0.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Constants.TIPOS_PALABRAS.forEachIndexed { index, tipo ->
-                Tab(
-                    text = { Text(tipo) },
-                    selected = selectedTabIndex == index,
-                    onClick = { selectedTabIndex = index }
-                )
+    inner class WebAppInterface(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun speak(text: String, lang: String, rate: Float, pitch: Float) {
+            activity.runOnUiThread {
+                activity.speak(text, lang, rate, pitch)
             }
         }
 
-        // Control deslizante para la velocidad
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp)
-        ) {
-            Text("Speed: ${speechRate}x")
-            Slider(
-                value = speechRate,
-                onValueChange = { newRate ->
-                    onSpeechRateChange(newRate)
-                    tts.setSpeechRate(newRate)
-                },
-                valueRange = 0.1f..2.0f,
-                steps = 100
-            )
+        @JavascriptInterface
+        fun startListening(lang: String) {
+            activity.startRecognition(lang)
         }
 
-        // Lista filtrada por tipo
-        LazyColumn(modifier = Modifier.padding(horizontal = 16.dp)) {
-            val filteredList = if (selectedTabIndex == 0) {
-                viewModel.englishList
-            } else {
-                viewModel.englishList.filter { it.PRO == Constants.TIPOS_PALABRAS[selectedTabIndex] }
-            }
+        @JavascriptInterface
+        fun stopListening() {
+            activity.stopRecognition()
+        }
 
-            items(filteredList) { item ->
-                PhraseItem(
-                    english = item.EN,
-                    spanish = item.ES,
-                    onClick = { onSpeak(item.EN) },
-                    onSpeakClick = {
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toString())
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Say the phrase in English")
-                        }
-                        speechLauncher.launch(intent)
-                    },
-                    onWordClick = { e -> onSpeak(e) },
-                    context = context,
-                    viewModel = viewModel,
-                    item = item
-                )
+        @JavascriptInterface
+        fun setSpeechRate(rate: Float) {
+            activity.runOnUiThread {
+                activity.setSpeechRate(rate)
             }
         }
-    }
-}
 
-@Composable
-fun PhraseItem1(
-    english: String,
-    spanish: String,
-    onClick: () -> Unit,
-    onSpeakClick: () -> Unit,
-    context: Context,
-    viewModel: MainViewModel,
-    item:EnglishModel
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .clickable(onClick = onClick),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = english, style = MaterialTheme.typography.headlineSmall)
-            Text(text = spanish, style = MaterialTheme.typography.bodyMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = {Remove(context=context,viewModel=viewModel,item )}) {
-                Text("Eliminar")
-            }
-
-            Button(onClick = onSpeakClick) {
-                Text("Speak and Check")
-            }
-        }
-    }
-}
-
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun PhraseItem(
-    english: String,
-    spanish: String,
-    onClick: () -> Unit,
-    onSpeakClick: () -> Unit,
-    onWordClick: (String) -> Unit,
-    context: Context,
-    viewModel: MainViewModel,
-    item: EnglishModel
-) {
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .clickable(onClick = onClick),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            ClickableWordsText(
-                text = english,
-                style = MaterialTheme.typography.headlineSmall,
-                onWordClick = onWordClick
-            )
-
-            Text(text = spanish, style = MaterialTheme.typography.bodyMedium)
-            Text(text = "Tipo: ${item.PRO}", style = MaterialTheme.typography.bodySmall)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Button(
-                    onClick = { showDeleteDialog = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Eliminar")
+        @JavascriptInterface
+        fun getVoiceName(lang: String): String {
+            if (!::tts.isInitialized) return "TTS Not Initialized"
+            try {
+                val locale = if (lang == "es") Locale("es", "ES") else Locale.US
+                activity.runOnUiThread { 
+                    // Optional: we might not want to switch UI state here, but simple getters are fine on background
+                    // Actually, TTS methods are thread safe. modifying language changes state.
                 }
-                Button(
-                    onClick = {
-                        viewModel.englishItem = item
-                        viewModel.selectedScreen = "Add"
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text("Editar")
+                // We set language to query what voice is used for that language
+                val result = activity.tts.setLanguage(locale)
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    return "Language Not Supported"
                 }
-                IconButton(
-                    onClick = onSpeakClick,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            MaterialTheme.colorScheme.secondary,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "Speak and Check",
-                        tint = MaterialTheme.colorScheme.onSecondary
-                    )
-                }
+                val voice = activity.tts.voice
+                return if (voice != null) "${voice.name} | ${voice.locale}" else "Default System Voice"
+            } catch (e: Exception) {
+                return "Error: ${e.message}"
             }
         }
-    }
 
-    ConfirmDeleteDialog(
-        showDialog = showDeleteDialog,
-        onDismiss = { showDeleteDialog = false },
-        onConfirm = { Remove(context = context, viewModel = viewModel, item) }
-    )
-}
+        @JavascriptInterface
+        fun openTtsSettings() {
+            try {
+                val intent = Intent("com.android.settings.TTS_SETTINGS")
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                activity.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error opening TTS settings: ${e.message}")
+            }
+        }
 
-@ExperimentalLayoutApi
-@Composable
-fun ClickableWordsText(
-    text: String,
-    style: TextStyle,
-    onWordClick: (String) -> Unit
-) {
-    val words = text.split(" ")
-
-    // Usamos FlowRow en lugar de Row para manejar el desbordamiento
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start,
-        verticalArrangement = Arrangement.Center,
-        maxItemsInEachRow = Int.MAX_VALUE // Sin límite de elementos por fila
-    ) {
-        words.forEachIndexed { index, word ->
-            Box(
-                modifier = Modifier
-                    .clickable { onWordClick(word) }
-                    .padding(end = 4.dp, bottom = 4.dp).height(40.dp)
-                    .background(
-                        color = Color.Gray.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(1.dp)
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = Color.Gray.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(4.dp)
-                    )
-                    .padding(horizontal = 4.dp)
-            ) {
-                Text(
-                    text = word,
-                    style = style,
-                    modifier = Modifier.padding(4.dp))
+        @JavascriptInterface
+        fun openBrowser(url: String) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                activity.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error opening browser: ${e.message}")
             }
         }
     }
 }
 
-
-@Composable
-fun PreviewPhraseListApp(context: Context,
-                         viewModel: MainViewModel) {
-
-    INGLESTheme {
-        PhraseListApp(
-            tts = TextToSpeech(null, null),
-            speechRate = 1.0f,
-            onSpeechRateChange = {},
-            onSpeak = {},
-            context = context,
-            viewModel = viewModel
-        )
-    }
-}
-
-@Composable
-fun BottomNavigationBar(viewModel: MainViewModel, onScreenSelected: (String) -> Unit) {
-    NavigationBar {
-        NavigationBarItem(
-            icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-            label = { Text("Home") },
-            selected = viewModel.selectedScreen == "Home",
-            onClick = { onScreenSelected("Home") }
-        )
-        NavigationBarItem(
-            icon = { Icon(Icons.Default.Add, contentDescription = "Add") },
-            label = { Text("Add") },
-            selected = viewModel.selectedScreen == "Add",
-            onClick = { onScreenSelected("Add") }
-        )
-        NavigationBarItem(
-            icon = { Icon(Icons.Default.Settings, contentDescription = "Types") },
-            label = { Text("Types") },
-            selected = viewModel.selectedScreen == "Types",
-            onClick = { onScreenSelected("Types") }
-        )
-    }
-}
-
-@Composable
-fun ConfirmDeleteDialog(
-    showDialog: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { onDismiss() },
-            title = {
-                Text(text = "¿Estás seguro?")
-            },
-            text = {
-                Text("Esta acción eliminará el elemento. ¿Quieres continuar?")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    onConfirm()
-                    onDismiss()
-                }) {
-                    Text("Eliminar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { onDismiss() }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
-}
-
-
-
-fun Remove(context: Context, viewModel: MainViewModel, value:EnglishModel){
-  //  if ( value.id!="") {
-        viewModel.englishList.remove(value);
-        val gson = Gson()
-        val jsonArray2 = gson.toJson(viewModel.englishList)
-        saveJsonToFile(context, viewModel.fileNameEnglish, jsonArray2);
-    //}
-}
 
