@@ -13,3 +13,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+/.vs/INGLES/CopilotIndices/17.14.1368.60722
+/.vs/INGLES/FileContentIndex
+/.vs/INGLES/v17
+*.json
+*.sqlite
+*.sqlite-journal
