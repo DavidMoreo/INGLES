@@ -608,6 +608,8 @@
                 <button class="mic-button" id="micBtn" onclick="toggleRecording()">MIC</button>
                 <textarea id="userInput" placeholder="Escribe o habla..." disabled></textarea>
                 <button class="send-btn" id="sendBtn" onclick="sendMessage()">Enviar</button>
+                <button class="send-btn" id="resetBtn" onclick="resetChat()" style="background:#e53e3e; padding:0 15px;"
+                    title="Reiniciar conversación">🔄</button>
             </div>
         </div>
 
@@ -720,7 +722,9 @@
         let currentApiKey = localStorage.getItem('geminiActiveKey') || '';
 
         // --- HISTORY PERSISTENCE CHANGE ---
-        let conversationHistory = JSON.parse(localStorage.getItem('conversationHistory')) || [];
+        // Chat history is NOT persisted - starts fresh each session
+        // Only practice phrases are saved
+        let conversationHistory = [];
 
         // LOCAL AGENT STATE
         let localAgentConfig = JSON.parse(localStorage.getItem('localAgentConfig')) || null; // { url: 'http://...', name: '...', systemPrompt: '...' }
@@ -757,12 +761,8 @@
                 const exists = apiKeysList.some(k => k.key === currentApiKey);
                 if (exists) {
                     updateStatus(true);
-                    // initRecognition(); // Android recognition is lazy loaded
-                    if (conversationHistory.length === 0) {
-                        showInitialMessage();
-                    } else {
-                        renderHistory();
-                    }
+                    // Always show initial message - chat doesn't persist
+                    showInitialMessage();
                 } else {
                     currentApiKey = '';
                     localStorage.removeItem('geminiActiveKey');
@@ -896,6 +896,9 @@
             document.getElementById('userInput').disabled = disabled;
             document.getElementById('sendBtn').disabled = disabled;
             document.getElementById('micBtn').disabled = disabled;
+            // Reset button should ALWAYS be enabled
+            const resetBtn = document.getElementById('resetBtn');
+            if (resetBtn) resetBtn.disabled = false;
         }
 
         // --- PROMPT & GEMINI ---
@@ -924,7 +927,7 @@
             input.value = '';
 
             conversationHistory.push({ role: 'user', parts: [{ text: text }] });
-            saveChatHistory();
+            // Chat history is NOT saved - only kept in memory for this session
 
             const loadingId = showLoading();
             const historyToSend = conversationHistory.slice(-6);
@@ -957,7 +960,7 @@
                 }
 
                 conversationHistory.push({ role: 'model', parts: [{ text: JSON.stringify(aiJson) }] });
-                saveChatHistory();
+                // Chat history is NOT saved - only kept in memory for this session
                 addAiMessage(aiJson);
 
             } catch (e) {
@@ -1254,9 +1257,7 @@
             }
         }
 
-        function saveChatHistory() {
-            localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
-        }
+        // saveChatHistory function removed - chat is not persisted
 
         function renderHistory() {
             const container = document.getElementById('chatContainer');
@@ -1643,6 +1644,24 @@
                 fb.className = `pc-feedback ${ok ? 'correct' : 'incorrect'}`;
             }
             recordingMode = 'chat'; // Reset
+        }
+
+        function resetChat() {
+            if (!confirm('¿Reiniciar la conversación? (Las frases guardadas en Práctica NO se borrarán)')) return;
+
+            // Clear conversation history (only in memory)
+            conversationHistory.length = 0;
+
+            // Clear chat container
+            const container = document.getElementById('chatContainer');
+            if (container) {
+                container.innerHTML = '';
+            }
+
+            // Show initial message
+            if (currentApiKey || localAgentConfig) {
+                showInitialMessage();
+            }
         }
     </script>
 </body>
