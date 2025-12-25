@@ -254,6 +254,92 @@
             color: #f6e05e;
         }
 
+        /* Word Practice Modal */
+        .word-modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .word-modal-backdrop.active {
+            display: flex;
+        }
+
+        .word-modal {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            max-width: 90%;
+            max-height: 80%;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .word-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        .word-modal-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1e3c72;
+        }
+
+        .word-modal-close {
+            background: #e53e3e;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            font-size: 18px;
+        }
+
+        .word-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .word-btn {
+            padding: 8px 12px;
+            background: #e2e8f0;
+            border: 2px solid #cbd5e0;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .word-btn.selected {
+            background: #1e3c72;
+            color: white;
+            border-color: #1e3c72;
+        }
+
+        .word-modal-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+        }
+
         .input-container {
             position: fixed;
             bottom: 0;
@@ -1283,6 +1369,7 @@
                         <div class="text-with-audio">
                             <div><span class="main-text">${wrapWords(data.english)}</span><div class="pronunciation-text">🗣️ ${data.pronunciation || ''}</div></div>
                             <button class="speak-btn" onclick="speak('${data.english.replace(/'/g, "\\'")}', 'en')">🔊</button>
+                            <button class="speak-btn" onclick="openWordPractice('${data.english.replace(/'/g, "\\'")}')">🔤</button>
                         </div>
                         <div style="font-size:13px; color:#666; margin-top:5px; border-top:1px dashed #eee; padding-top:2px;">${data.spanish}</div>
                     </div>
@@ -1294,6 +1381,7 @@
                             <div class="pronunciation-text" style="font-size:13px; margin-bottom:4px;">🗣️ ${option.pronunciation || ''}</div>
                             <div class="option-spanish">${option.spanish}</div>
                             <button class="speak-btn" style="margin-top:5px;" onclick="event.stopPropagation(); speak('${option.english.replace(/'/g, "\\'")}', 'en')">🔊 Escuchar</button>
+                            <button class="speak-btn" style="margin-top:5px;" onclick="event.stopPropagation(); openWordPractice('${option.english.replace(/'/g, "\\'")}')">🔤 Palabras</button>
                         </div>
                     </div>` : ''}
                 </div>
@@ -1630,6 +1718,7 @@
                         <div style="display:flex; gap:5px; margin-top:5px;">
                             <button class="pc-btn" style="font-size:11px; padding:4px 8px;" onclick="speak('${teacherObj.english.replace(/'/g, "\\'")}', 'en')">🔊 Escuchar</button>
                             <button class="pc-btn pc-record" style="font-size:11px; padding:4px 8px;" onclick="practicePhrase('${teacherObj.english.replace(/'/g, "\\'")}', ${i}, 'teacher')">🎤 Practicar</button>
+                            <button class="pc-btn" style="font-size:11px; padding:4px 8px;" onclick="openWordPractice('${teacherObj.english.replace(/'/g, "\\'")}')">🔤 Palabras</button>
                         </div>
                     </div>
                 `;
@@ -1645,6 +1734,7 @@
                              <div style="display:flex; gap:5px; margin-top:5px;">
                                 <button class="pc-btn" style="font-size:11px; padding:4px 8px;" onclick="speak('${studentObj.english.replace(/'/g, "\\'")}', 'en')">🔊 Escuchar</button>
                                 <button class="pc-btn pc-record" style="font-size:11px; padding:4px 8px;" onclick="practicePhrase('${studentObj.english.replace(/'/g, "\\'")}', ${i}, 'student')">🎤 Practicar</button>
+                                <button class="pc-btn" style="font-size:11px; padding:4px 8px;" onclick="openWordPractice('${studentObj.english.replace(/'/g, "\\'")}')">🔤 Palabras</button>
                              </div>
                         </div>
                     `;
@@ -1772,7 +1862,88 @@
                 showInitialMessage();
             }
         }
+
+        // ===== WORD PRACTICE MODULE =====
+        let currentPhraseWords = [];
+
+        function openWordPractice(phrase) {
+            if (!phrase || !phrase.trim()) return;
+
+            // Split phrase into words (remove punctuation)
+            currentPhraseWords = phrase.trim().split(/\s+/).map(word => ({
+                text: word.replace(/[.,!?;:]/g, ''),
+                original: word,
+                selected: false
+            }));
+
+            // Render word buttons
+            const wordGrid = document.getElementById('wordGrid');
+            wordGrid.innerHTML = '';
+
+            currentPhraseWords.forEach((wordObj, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'word-btn';
+                btn.textContent = wordObj.original;
+                btn.onclick = () => toggleWordSelection(index);
+                wordGrid.appendChild(btn);
+            });
+
+            // Show modal
+            document.getElementById('wordModalBackdrop').classList.add('active');
+        }
+
+        function closeWordPractice() {
+            document.getElementById('wordModalBackdrop').classList.remove('active');
+            currentPhraseWords = [];
+        }
+
+        function toggleWordSelection(index) {
+            currentPhraseWords[index].selected = !currentPhraseWords[index].selected;
+            const buttons = document.querySelectorAll('.word-btn');
+            if (buttons[index]) {
+                buttons[index].classList.toggle('selected');
+            }
+        }
+
+        function selectAllWords() {
+            currentPhraseWords.forEach(w => w.selected = true);
+            document.querySelectorAll('.word-btn').forEach(btn => btn.classList.add('selected'));
+        }
+
+        function clearWordSelection() {
+            currentPhraseWords.forEach(w => w.selected = false);
+            document.querySelectorAll('.word-btn').forEach(btn => btn.classList.remove('selected'));
+        }
+
+        function playSelectedWords() {
+            const selectedWords = currentPhraseWords
+                .filter(w => w.selected)
+                .map(w => w.text)
+                .join(' ');
+
+            if (selectedWords.trim()) {
+                speak(selectedWords, 'en');
+            } else {
+                alert('Selecciona al menos una palabra');
+            }
+        }
     </script>
+
+    <!-- Word Practice Modal -->
+    <div id="wordModalBackdrop" class="word-modal-backdrop">
+        <div class="word-modal">
+            <div class="word-modal-header">
+                <div class="word-modal-title">🔤 Selecciona Palabras</div>
+                <button class="word-modal-close" onclick="closeWordPractice()">×</button>
+            </div>
+            <div id="wordGrid" class="word-grid"></div>
+            <div class="word-modal-controls">
+                <button class="pc-btn" onclick="selectAllWords()">✓ Todas</button>
+                <button class="pc-btn" onclick="clearWordSelection()">✗ Ninguna</button>
+                <button class="pc-btn pc-record" onclick="playSelectedWords()">🔊 Reproducir</button>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
