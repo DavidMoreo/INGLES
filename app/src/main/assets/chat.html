@@ -1918,7 +1918,7 @@
         function playSelectedWords() {
             const selectedWords = currentPhraseWords
                 .filter(w => w.selected)
-                .map(w => w.text)
+                .map(w => w.original)  // Use original with punctuation
                 .join(' ');
 
             if (selectedWords.trim()) {
