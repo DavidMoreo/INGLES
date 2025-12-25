@@ -1982,6 +1982,120 @@
                 alert('Selecciona al menos una palabra');
             }
         }
+
+        // ===== SPEECH RECOGNITION HANDLERS =====
+        window.onAndroidSpeechResult = function (recognizedText) {
+            if (recordingMode === 'practice' && currentPracticeIndex >= 0) {
+                updateMastery(currentPracticeIndex, recognizedText, currentPracticeTarget);
+            }
+        };
+
+        window.onAndroidSpeechError = function (error) {
+            console.log('Speech error:', error);
+            if (recordingMode === 'practice' && currentPracticeIndex >= 0) {
+                const fb = document.getElementById(`feedback-${currentPracticeIndex}`);
+                if (fb) {
+                    fb.textContent = `Error: ${error}`;
+                    fb.className = 'pc-feedback error';
+                }
+            }
+        };
+
+        window.onAndroidSpeechStarted = function () {
+            console.log('Speech recognition started');
+        };
+
+        window.onAndroidTtsStart = function () {
+            console.log('TTS started');
+        };
+
+        window.onAndroidTtsEnd = function () {
+            console.log('TTS ended');
+        };
+
+        // ===== MASTERY UPDATE LOGIC =====
+        function updateMastery(phraseIndex, recognizedText, targetText) {
+            const phrase = savedPhrases[phraseIndex];
+            if (!phrase || !phrase.mastery) return;
+
+            // Determine current mode
+            const modeKey = practiceMode === 'read' ? 'read' :
+                practiceMode === 'translation' ? 'translation' : 'listening';
+
+            // Calculate accuracy with word-by-word weighted comparison
+            const accuracy = calculateWordAccuracy(recognizedText.toLowerCase(), targetText.toLowerCase());
+            const isCorrect = accuracy >= 0.90; // 90% threshold
+
+            const fb = document.getElementById(`feedback-${phraseIndex}`);
+
+            if (isCorrect) {
+                // Correct answer (≥90%)
+                phrase.mastery[modeKey].streak++;
+                phrase.mastery[modeKey].lastPracticed = Date.now();
+
+                if (phrase.mastery[modeKey].streak >= 3) {
+                    // Level up!
+                    phrase.mastery[modeKey].order++;
+                    phrase.mastery[modeKey].streak = 0;
+
+                    if (fb) {
+                        fb.textContent = `✅ ¡Perfecto! Nivel ${phrase.mastery[modeKey].order} 🎉 (${Math.round(accuracy * 100)}%)`;
+                        fb.className = 'pc-feedback success';
+                    }
+                } else {
+                    if (fb) {
+                        fb.textContent = `✅ ¡Bien! (${phrase.mastery[modeKey].streak}/3) - ${Math.round(accuracy * 100)}%`;
+                        fb.className = 'pc-feedback success';
+                    }
+                }
+            } else {
+                // Incorrect answer (<90%)
+                phrase.mastery[modeKey].order = Math.max(0, phrase.mastery[modeKey].order - 1);
+                phrase.mastery[modeKey].streak = 0;
+                phrase.mastery[modeKey].lastPracticed = Date.now();
+
+                if (fb) {
+                    fb.textContent = `❌ ${Math.round(accuracy * 100)}% - Dijiste: "${recognizedText}"`;
+                    fb.className = 'pc-feedback error';
+                }
+            }
+
+            // Save updated mastery
+            localStorage.setItem('savedPhrases', JSON.stringify(savedPhrases));
+
+            // Feedback stays visible until next practice
+        }
+
+        // Word-by-word weighted accuracy calculation
+        function calculateWordAccuracy(recognized, target) {
+            // Remove punctuation and split into words
+            const cleanRecognized = recognized.replace(/[.,!?;:]/g, '').trim();
+            const cleanTarget = target.replace(/[.,!?;:]/g, '').trim();
+
+            const recognizedWords = cleanRecognized.split(/\s+/);
+            const targetWords = cleanTarget.split(/\s+/);
+
+            if (targetWords.length === 0) return 0;
+
+            // Penalize if word count is different
+            if (recognizedWords.length !== targetWords.length) {
+                return 0; // Automatic fail if word count doesn't match
+            }
+
+            // Each word has equal weight
+            const wordWeight = 1.0 / targetWords.length;
+            let totalScore = 0;
+
+            // Compare word by word in order
+            for (let i = 0; i < targetWords.length; i++) {
+                if (i < recognizedWords.length && recognizedWords[i] === targetWords[i]) {
+                    // Exact match in same position → add full weight
+                    totalScore += wordWeight;
+                }
+            }
+
+            return totalScore;
+        }
     </script>
 
     <!-- Word Practice Modal -->
