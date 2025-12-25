@@ -4,6 +4,9 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
+import java.net.NetworkInterface
+import java.util.Collections
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -77,6 +80,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.allowFileAccess = true
+                    settings.allowUniversalAccessFromFileURLs = true
                     
                     addJavascriptInterface(WebAppInterface(this@MainActivity), "Android")
                     
@@ -322,6 +326,43 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {
                 Log.e("MainActivity", "Error opening browser: ${e.message}")
             }
+        }
+
+        @JavascriptInterface
+        fun getLocalIpAddress(): String {
+            try {
+                // Method 1: WifiManager (fast but sometimes restricted)
+                val wifiManager = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                val ipAddress = wifiManager.connectionInfo.ipAddress
+                if (ipAddress != 0) {
+                     java.util.Locale.setDefault(java.util.Locale.US) 
+                     return android.text.format.Formatter.formatIpAddress(ipAddress)
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "WifiManager IP failed: ${e.message}")
+            }
+
+            // Method 2: NetworkInterfaces (Fallback)
+            try {
+                val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                for (intf in interfaces) {
+                    val addrs = Collections.list(intf.inetAddresses)
+                    for (addr in addrs) {
+                        if (!addr.isLoopbackAddress) {
+                            val sAddr = addr.hostAddress
+                            // We want IPv4 like 192.168...
+                            val isIPv4 = sAddr?.indexOf(':') ?: -1 < 0
+                            if (isIPv4 && sAddr != null && !sAddr.startsWith("10.0.2")) { // Filter emulator loopback 10.0.2.15 usually
+                                return sAddr
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                 Log.e("MainActivity", "NetworkInterface IP failed: ${e.message}")
+            }
+            
+            return "0.0.0.0"
         }
     }
 }
