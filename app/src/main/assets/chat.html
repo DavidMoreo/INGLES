@@ -861,8 +861,32 @@
         let currentPracticeIndex = -1;
         let currentPracticeTarget = '';
 
+        // Migrate old phrases to new mastery structure
+        function migratePhrases() {
+            let migrated = false;
+            savedPhrases = savedPhrases.map(phrase => {
+                if (!phrase.mastery) {
+                    migrated = true;
+                    return {
+                        ...phrase,
+                        mastery: {
+                            read: { order: 0, streak: 0, lastPracticed: null },
+                            translation: { order: 0, streak: 0, lastPracticed: null },
+                            listening: { order: 0, streak: 0, lastPracticed: null }
+                        }
+                    };
+                }
+                return phrase;
+            });
+            if (migrated) {
+                localStorage.setItem('savedPhrases', JSON.stringify(savedPhrases));
+                console.log('Migrated phrases to new mastery structure');
+            }
+        }
+
         // --- INICIALIZACIÓN ---
         document.addEventListener('DOMContentLoaded', () => {
+            migratePhrases(); // Migrate old phrases first
             initTabs();
             // loadVoices(); // Android TTS handles voices differently
 
@@ -1414,7 +1438,12 @@
                     console.log('Auto-saving to practice:', { teacher: tEn, student: sEn });
                     savedPhrases.push({
                         teacher: { english: tEn, spanish: tEs, pronunciation: tPron },
-                        student: { english: sEn, spanish: sEs, pronunciation: sPron }
+                        student: { english: sEn, spanish: sEs, pronunciation: sPron },
+                        mastery: {
+                            read: { order: 0, streak: 0, lastPracticed: null },
+                            translation: { order: 0, streak: 0, lastPracticed: null },
+                            listening: { order: 0, streak: 0, lastPracticed: null }
+                        }
                     });
                     localStorage.setItem('savedPhrases', JSON.stringify(savedPhrases));
                     console.log('Saved! Total phrases:', savedPhrases.length);
@@ -1686,7 +1715,15 @@
             const list = document.getElementById('practiceList'); list.innerHTML = '';
             if (savedPhrases.length === 0) return list.innerHTML = '<p style="text-align:center; color:#999;">No hay frases guardadas.</p>';
 
-            savedPhrases.forEach((phrase, i) => {
+            // Sort by current practice mode's order (lower order first)
+            const modeKey = practiceMode === 'read' ? 'read' : practiceMode === 'translation' ? 'translation' : 'listening';
+            const sortedPhrases = [...savedPhrases].sort((a, b) => {
+                const orderA = a.mastery?.[modeKey]?.order || 0;
+                const orderB = b.mastery?.[modeKey]?.order || 0;
+                return orderA - orderB;
+            });
+
+            sortedPhrases.forEach((phrase, i) => {
                 const div = document.createElement('div');
                 div.className = 'practice-card';
                 div.id = `phrase-${i}`;
@@ -1706,7 +1743,25 @@
                 if (practiceMode === 'translation') spaClass = 'hidden-text';
                 else if (practiceMode === 'listening') { engClass = 'hidden-text'; spaClass = 'hidden-text'; }
 
-                let contentHtml = '';
+                // Progress Indicators
+                const mastery = phrase.mastery || {
+                    read: { order: 0, streak: 0 },
+                    translation: { order: 0, streak: 0 },
+                    listening: { order: 0, streak: 0 }
+                };
+
+                const getStars = (order) => '⭐'.repeat(Math.min(order, 5));
+                const getColor = (order) => order === 0 ? '#e53e3e' : order < 3 ? '#f6ad55' : '#48bb78';
+
+                const progressHtml = `
+                    <div style="display:flex; gap:10px; margin-bottom:8px; font-size:11px; border-bottom:1px solid #eee; padding-bottom:5px;">
+                        <div style="color:${getColor(mastery.read.order)};">📖 ${getStars(mastery.read.order)} (${mastery.read.streak}/3)</div>
+                        <div style="color:${getColor(mastery.translation.order)};">📝 ${getStars(mastery.translation.order)} (${mastery.translation.streak}/3)</div>
+                        <div style="color:${getColor(mastery.listening.order)};">👂 ${getStars(mastery.listening.order)} (${mastery.listening.streak}/3)</div>
+                    </div>
+                `;
+
+                let contentHtml = progressHtml;
 
                 // Teacher Part
                 contentHtml += `
