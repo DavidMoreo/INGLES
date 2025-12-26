@@ -703,8 +703,8 @@
                 <button class="mic-button" id="micBtn" onclick="toggleRecording()">MIC</button>
                 <textarea id="userInput" placeholder="Escribe o habla..." disabled></textarea>
                 <button class="send-btn" id="sendBtn" onclick="sendMessage()">Enviar</button>
-                <button class="send-btn" id="resetBtn" onclick="resetChat()" style="background:#e53e3e; padding:0 15px;"
-                    title="Reiniciar conversación">🔄</button>
+                <button class="send-btn" id="resetBtn" onclick="location.reload()"
+                    style="background:#ff8c00; padding:0 15px;" title="Reiniciar conversación">🔄</button>
             </div>
         </div>
 
@@ -975,6 +975,13 @@
             const savedRate = localStorage.getItem('speechRate') || '1.0';
             rateSlider.value = savedRate;
             document.getElementById('rateValue').textContent = savedRate;
+
+            // Reset button event listener
+            const resetBtn = document.getElementById('resetBtn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', resetChat);
+                console.log('Reset button listener added');
+            }
 
             // Load Scanner Config
             const savedScanner = JSON.parse(localStorage.getItem('scannerConfig')) || {};
@@ -1895,18 +1902,25 @@
             }
         }
 
-        function resetChat() {
-            if (!confirm('¿Reiniciar la conversación? (Las frases guardadas en Práctica NO se borrarán)')) return;
+        window.resetChat = function () {
+            console.log('resetChat called');
+            if (!confirm('¿Reiniciar la conversación? (Las frases guardadas en Práctica NO se borrarán)')) {
+                console.log('User cancelled reset');
+                return;
+            }
 
-            // Clear conversation history
+            console.log('Clearing conversation history');
             conversationHistory = [];
 
-            // Clear chat container
             const container = document.getElementById('chatContainer');
             if (container) {
+                console.log('Clearing chat container');
                 container.innerHTML = '';
+            } else {
+                console.log('Chat container not found');
             }
-        }
+            console.log('Reset complete');
+        };
 
         function practicePhrase(target, i, type = 'student') {
             if (typeof Android !== 'undefined') {
@@ -2193,7 +2207,7 @@
                     phrase.mastery.translation.order,
                     phrase.mastery.listening.order
                 );
-                if (minOrder <= 1) {
+                if (minOrder <= 1 && phrase.teacher && phrase.teacher.english) {
                     stats.struggling.push({
                         text: phrase.teacher.english,
                         order: minOrder,
